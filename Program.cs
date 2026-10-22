@@ -3,17 +3,23 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 
+
+// create webapp & load auto config
 var builder = WebApplication.CreateBuilder(args);
+// call api LINE
 builder.Services.AddHttpClient();
 builder.Services.AddDbContext<AppDbContext>(o =>
     o.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
+
 var app = builder.Build();
 
+// read channelSecret & accessToken
 var channelSecret = builder.Configuration["Line:ChannelSecret"]
     ?? throw new Exception("Missing Line:ChannelSecret");
 var accessToken = builder.Configuration["Line:AccessToken"]
     ?? throw new Exception("Missing Line:AccessToken");
 
+// check server
 app.MapGet("/", () => "Bookshelf bot is running");
 
 app.MapPost("/webhook", async (HttpRequest req, IHttpClientFactory httpFactory, AppDbContext db) =>
@@ -70,6 +76,7 @@ app.Run();
 
 static async Task<object> HandleCommand(AppDbContext db, AppUser user, string text)
 {
+    //HandleCommand
     var parts = text.Split(' ', 2,
         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     var cmd = parts.Length > 0 ? parts[0] : "";
@@ -113,12 +120,7 @@ static async Task<object> HandleCommand(AppDbContext db, AppUser user, string te
 
         case "วิธีใช้":
         default:
-            return TextMessage(
-                "ใช้ได้ตามนี้\n" +
-                "เพิ่ม ชื่อหนังสือ\n" +
-                "ชั้นหนังสือ\n" +
-                "อ่านแล้ว ชื่อหนังสือ\n" +
-                "ลบ ชื่อหนังสือ");
+            return HelpFlex();
     }
 }
 
@@ -141,9 +143,10 @@ static async Task<object> ShelfOrEmpty(AppDbContext db, AppUser user)
 static object TextMessage(string text) => new { type = "text", text };
 
 // Flex Message: การ์ดชั้นหนังสือ มีปุ่ม "อ่านแล้ว" / "ลบ" ในแต่ละเล่ม
+
 static object ShelfFlex(List<Book> books)
 {
-    const int max = 10; // กันข้อความยาวเกินไป
+    const int max = 10;
     var rows = new List<object>();
 
     for (var i = 0; i < Math.Min(books.Count, max); i++)
@@ -157,16 +160,28 @@ static object ShelfFlex(List<Book> books)
             {
                 type = "button",
                 style = "primary",
+                color = "#B5603B",
                 height = "sm",
-                action = new { type = "message", label = "อ่านแล้ว", text = $"อ่านแล้ว {b.Title}" }
+                action = new
+                {
+                    type = "message",
+                    label = "อ่านแล้ว",
+                    text = $"อ่านแล้ว {b.Title}"
+                }
             });
         }
+
         buttons.Add(new
         {
             type = "button",
             style = "secondary",
             height = "sm",
-            action = new { type = "message", label = "ลบ", text = $"ลบ {b.Title}" }
+            action = new
+            {
+                type = "message",
+                label = "ลบ",
+                text = $"ลบ {b.Title}"
+            }
         });
 
         rows.Add(new
@@ -176,7 +191,14 @@ static object ShelfFlex(List<Book> books)
             spacing = "sm",
             contents = new object[]
             {
-                new { type = "text", text = $"{i + 1}. {b.Title}", wrap = true, weight = "bold" },
+                new
+                {
+                    type = "text",
+                    text = $"{i + 1}. {b.Title}",
+                    wrap = true,
+                    weight = "bold",
+                    color = "#4A3426"
+                },
                 new
                 {
                     type = "text",
@@ -184,15 +206,32 @@ static object ShelfFlex(List<Book> books)
                     size = "xs",
                     color = b.IsRead ? "#2E8B57" : "#888888"
                 },
-                new { type = "box", layout = "horizontal", spacing = "sm", contents = buttons },
-                new { type = "separator", margin = "md" }
+                new
+                {
+                    type = "box",
+                    layout = "horizontal",
+                    spacing = "sm",
+                    contents = buttons
+                },
+                new
+                {
+                    type = "separator",
+                    margin = "md",
+                    color = "#E2D6C0"
+                }
             }
         });
     }
 
     if (books.Count > max)
     {
-        rows.Add(new { type = "text", text = $"และอีก {books.Count - max} เล่ม", size = "sm", color = "#888888" });
+        rows.Add(new
+        {
+            type = "text",
+            text = $"และอีก {books.Count - max} เล่ม",
+            size = "sm",
+            color = "#888888"
+        });
     }
 
     var readCount = books.Count(b => b.IsRead);
@@ -204,21 +243,200 @@ static object ShelfFlex(List<Book> books)
         contents = new
         {
             type = "bubble",
+            size = "mega",
+
             header = new
             {
                 type = "box",
                 layout = "vertical",
+                backgroundColor = "#4A3426",
+                paddingAll = "lg",
                 spacing = "xs",
                 contents = new object[]
                 {
-                    new { type = "text", text = "ชั้นหนังสือ", weight = "bold", size = "lg" },
-                    new { type = "text", text = $"ทั้งหมด {books.Count} เล่ม อ่านแล้ว {readCount} เล่ม", size = "xs", color = "#888888" }
+                    new
+                    {
+                        type = "text",
+                        text = "ชั้นหนังสือของฉัน",
+                        weight = "bold",
+                        size = "lg",
+                        color = "#FFFFFF",
+                        wrap = true
+                    },
+                    new
+                    {
+                        type = "text",
+                        text = $"ทั้งหมด {books.Count} เล่ม อ่านแล้ว {readCount} เล่ม",
+                        size = "xs",
+                        color = "#E2D6C0",
+                        wrap = true
+                    }
                 }
             },
-            body = new { type = "box", layout = "vertical", spacing = "md", contents = rows }
+
+            body = new
+            {
+                type = "box",
+                layout = "vertical",
+                spacing = "md",
+                paddingAll = "lg",
+                backgroundColor = "#FFFFFF",
+                contents = rows
+            },
+
+            styles = new
+            {
+                header = new { backgroundColor = "#4A3426" },
+                body = new { backgroundColor = "#FFFFFF" }
+            }
         }
     };
 }
+
+
+// Flex Message: การ์ดวิธีใช้
+
+static object HelpFlex()
+{
+    static object Row(string cmd, string desc, string? example)
+    {
+        var lines = new List<object>
+        {
+            new
+            {
+                type = "text",
+                text = cmd,
+                weight = "bold",
+                size = "md",
+                color = "#4A3426"
+            },
+            new
+            {
+                type = "text",
+                text = desc,
+                size = "sm",
+                color = "#6A4A35",
+                wrap = true
+            }
+        };
+
+        if (example is not null)
+        {
+            lines.Add(new
+            {
+                type = "text",
+                text = $"เช่น {example}",
+                size = "xs",
+                color = "#B5603B",
+                wrap = true
+            });
+        }
+
+        return new
+        {
+            type = "box",
+            layout = "vertical",
+            spacing = "xs",
+            contents = lines
+        };
+    }
+
+    var sep = new
+    {
+        type = "separator",
+        margin = "md",
+        color = "#E2D6C0"
+    };
+
+    return new
+    {
+        type = "flex",
+        altText = "วิธีใช้บอทชั้นหนังสือ",
+        contents = new
+        {
+            type = "bubble",
+            styles = new
+            {
+                body = new { backgroundColor = "#FFFFFF" },
+                //footer = new { backgroundColor = "#E2D6C0" }
+            },
+            header = new
+            {
+                type = "box",
+                layout = "vertical",
+                backgroundColor = "#4A3426",
+                paddingAll = "lg",
+                spacing = "xs",
+                contents = new object[]
+                {
+                    new
+                    {
+                        type = "text",
+                        text = "วิธีใช้ ShelfBot",
+                        weight = "bold",
+                        size = "lg",
+                        color = "#FFFFFF"
+                    },
+                    new
+                    {
+                        type = "text",
+                        text = "พิมพ์คำสั่งตามนี้ได้เลย",
+                        size = "xs",
+                        color = "#E2D6C0"
+                    }
+                }
+            },
+            body = new
+            {
+                type = "box",
+                layout = "vertical",
+                spacing = "md",
+                paddingAll = "lg",
+                contents = new object[]
+                {
+                    Row("เพิ่ม ชื่อหนังสือ",
+                        "เพิ่มหนังสือเข้าชั้น",
+                        "เพิ่ม Atomic Habits"),
+                    sep,
+                    Row("ชั้นหนังสือ",
+                        "ดูหนังสือทั้งหมดพร้อมสถานะ",
+                        null),
+                    sep,
+                    Row("อ่านแล้ว ชื่อหนังสือ",
+                        "ทำเครื่องหมายว่าอ่านจบแล้ว",
+                        "อ่านแล้ว Atomic Habits"),
+                    sep,
+                    Row("ลบ ชื่อหนังสือ",
+                        "เอาหนังสือออกจากชั้น",
+                        "ลบ Atomic Habits")
+                }
+            },
+            footer = new
+            {
+                type = "box",
+                layout = "vertical",
+                paddingAll = "md",
+                contents = new object[]
+                {
+                    new
+                    {
+                        type = "button",
+                        style = "primary",
+                        color = "#4A3426",
+                        height = "sm",
+                        action = new
+                        {
+                            type = "message",
+                            label = "ดูชั้นหนังสือ",
+                            text = "ชั้นหนังสือ"
+                        }
+                    }
+                }
+            }
+        }
+    };
+}
+
 
 static async Task ReplyAsync(HttpClient http, string replyToken, object message)
 {
