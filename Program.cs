@@ -44,7 +44,7 @@ app.MapPost("/webhook", async (HttpRequest req, IHttpClientFactory httpFactory, 
         var text = message.GetProperty("text").GetString() ?? "";
         var replyToken = ev.GetProperty("replyToken").GetString()!;
 
-        // 3) หา user ถ้ายังไม่มีให้สร้างใหม่ (เก็บ LINE userId ลง SQL Server)
+        // 3) หา user ถ้ายังไม่มีให้สร้างใหม่
         var user = await db.Users.FirstOrDefaultAsync(u => u.LineUserId == lineUserId);
         if (user is null)
         {
@@ -65,8 +65,10 @@ app.MapPost("/webhook", async (HttpRequest req, IHttpClientFactory httpFactory, 
 app.Run();
 
 // ---------------------------------------------------------------
+// คำสั่งของบอท (ตอบกลับครั้งละ 1 ข้อความ)
+// ---------------------------------------------------------------
 
-static async Task<string> HandleCommand(AppDbContext db, AppUser user, string text)
+static async Task<object> HandleCommand(AppDbContext db, AppUser user, string text)
 {
     var parts = text.Split(' ', 2,
         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -76,63 +78,151 @@ static async Task<string> HandleCommand(AppDbContext db, AppUser user, string te
     switch (cmd)
     {
         case "เพิ่ม":
-        {
-            if (arg == "") return "พิมพ์แบบนี้นะ: เพิ่ม ชื่อหนังสือ";
-            if (arg.Length > 200) return "ชื่อยาวเกินไป (ไม่เกิน 200 ตัวอักษร)";
-            var exists = await db.Books.AnyAsync(b => b.AppUserId == user.Id && b.Title == arg);
-            if (exists) return $"มี \"{arg}\" อยู่ในชั้นแล้ว";
-            db.Books.Add(new Book { AppUserId = user.Id, Title = arg });
-            await db.SaveChangesAsync();
-            return $"เพิ่ม \"{arg}\" เข้าชั้นแล้ว 📚";
-        }
+            {
+                if (arg == "") return TextMessage("ใส่ชื่อหนังสือต่อท้ายด้วย เช่น เพิ่ม Atomic Habits");
+                if (arg.Length > 200) return TextMessage("ชื่อยาวเกิน 200 ตัวอักษร");
+                var exists = await db.Books.AnyAsync(b => b.AppUserId == user.Id && b.Title == arg);
+                if (exists) return TextMessage($"{arg} มีอยู่แล้ว");
+                db.Books.Add(new Book { AppUserId = user.Id, Title = arg });
+                await db.SaveChangesAsync();
+                return TextMessage($"เพิ่ม {arg} แล้ว");
+            }
 
         case "ชั้นหนังสือ":
-        {
-            var books = await db.Books
-                .Where(b => b.AppUserId == user.Id)
-                .OrderBy(b => b.CreatedAt)
-                .ToListAsync();
-            if (books.Count == 0) return "ชั้นยังว่างอยู่ ลองพิมพ์: เพิ่ม ชื่อหนังสือ";
-            var lines = books.Select((b, i) => $"{i + 1}. {(b.IsRead ? "✅" : "📖")} {b.Title}");
-            return "ชั้นหนังสือของคุณ\n" + string.Join("\n", lines);
-        }
+            return await ShelfOrEmpty(db, user);
 
         case "อ่านแล้ว":
-        {
-            if (arg == "") return "พิมพ์แบบนี้นะ: อ่านแล้ว ชื่อหนังสือ";
-            var book = await db.Books.FirstOrDefaultAsync(b => b.AppUserId == user.Id && b.Title == arg);
-            if (book is null) return $"ไม่เจอ \"{arg}\" ในชั้น";
-            book.IsRead = true;
-            await db.SaveChangesAsync();
-            return $"ทำเครื่องหมายว่าอ่าน \"{arg}\" แล้ว ✅";
-        }
+            {
+                if (arg == "") return TextMessage("ใส่ชื่อหนังสือต่อท้ายด้วย เช่น อ่านแล้ว Atomic Habits");
+                var book = await db.Books.FirstOrDefaultAsync(b => b.AppUserId == user.Id && b.Title == arg);
+                if (book is null) return TextMessage($"ไม่เจอ {arg} ในชั้น");
+                book.IsRead = true;
+                await db.SaveChangesAsync();
+                return await ShelfOrEmpty(db, user); // การ์ดที่อัปเดตแล้วคือตัวยืนยัน
+            }
 
         case "ลบ":
-        {
-            if (arg == "") return "พิมพ์แบบนี้นะ: ลบ ชื่อหนังสือ";
-            var book = await db.Books.FirstOrDefaultAsync(b => b.AppUserId == user.Id && b.Title == arg);
-            if (book is null) return $"ไม่เจอ \"{arg}\" ในชั้น";
-            db.Books.Remove(book);
-            await db.SaveChangesAsync();
-            return $"ลบ \"{arg}\" ออกแล้ว";
-        }
+            {
+                if (arg == "") return TextMessage("ใส่ชื่อหนังสือต่อท้ายด้วย เช่น ลบ Atomic Habits");
+                var book = await db.Books.FirstOrDefaultAsync(b => b.AppUserId == user.Id && b.Title == arg);
+                if (book is null) return TextMessage($"ไม่เจอ {arg} ในชั้น");
+                db.Books.Remove(book);
+                await db.SaveChangesAsync();
+                return await ShelfOrEmpty(db, user);
+            }
 
+        case "วิธีใช้":
         default:
-            return "คำสั่งที่ใช้ได้\n" +
-                   "• เพิ่ม ชื่อหนังสือ\n" +
-                   "• ชั้นหนังสือ\n" +
-                   "• อ่านแล้ว ชื่อหนังสือ\n" +
-                   "• ลบ ชื่อหนังสือ";
+            return TextMessage(
+                "ใช้ได้ตามนี้\n" +
+                "เพิ่ม ชื่อหนังสือ\n" +
+                "ชั้นหนังสือ\n" +
+                "อ่านแล้ว ชื่อหนังสือ\n" +
+                "ลบ ชื่อหนังสือ");
     }
 }
 
-static async Task ReplyAsync(HttpClient http, string replyToken, string text)
+static async Task<object> ShelfOrEmpty(AppDbContext db, AppUser user)
 {
-    var payload = JsonSerializer.Serialize(new
+    var books = await db.Books
+        .Where(b => b.AppUserId == user.Id)
+        .OrderBy(b => b.CreatedAt)
+        .ToListAsync();
+
+    return books.Count == 0
+        ? TextMessage("ยังไม่มีหนังสือในชั้น พิมพ์ เพิ่ม ตามด้วยชื่อหนังสือได้เลย")
+        : ShelfFlex(books);
+}
+
+// ---------------------------------------------------------------
+// ตัวช่วยสร้างข้อความ LINE
+// ---------------------------------------------------------------
+
+static object TextMessage(string text) => new { type = "text", text };
+
+// Flex Message: การ์ดชั้นหนังสือ มีปุ่ม "อ่านแล้ว" / "ลบ" ในแต่ละเล่ม
+static object ShelfFlex(List<Book> books)
+{
+    const int max = 10; // กันข้อความยาวเกินไป
+    var rows = new List<object>();
+
+    for (var i = 0; i < Math.Min(books.Count, max); i++)
     {
-        replyToken,
-        messages = new[] { new { type = "text", text } }
-    });
+        var b = books[i];
+        var buttons = new List<object>();
+
+        if (!b.IsRead)
+        {
+            buttons.Add(new
+            {
+                type = "button",
+                style = "primary",
+                height = "sm",
+                action = new { type = "message", label = "อ่านแล้ว", text = $"อ่านแล้ว {b.Title}" }
+            });
+        }
+        buttons.Add(new
+        {
+            type = "button",
+            style = "secondary",
+            height = "sm",
+            action = new { type = "message", label = "ลบ", text = $"ลบ {b.Title}" }
+        });
+
+        rows.Add(new
+        {
+            type = "box",
+            layout = "vertical",
+            spacing = "sm",
+            contents = new object[]
+            {
+                new { type = "text", text = $"{i + 1}. {b.Title}", wrap = true, weight = "bold" },
+                new
+                {
+                    type = "text",
+                    text = b.IsRead ? "อ่านแล้ว" : "ยังไม่ได้อ่าน",
+                    size = "xs",
+                    color = b.IsRead ? "#2E8B57" : "#888888"
+                },
+                new { type = "box", layout = "horizontal", spacing = "sm", contents = buttons },
+                new { type = "separator", margin = "md" }
+            }
+        });
+    }
+
+    if (books.Count > max)
+    {
+        rows.Add(new { type = "text", text = $"และอีก {books.Count - max} เล่ม", size = "sm", color = "#888888" });
+    }
+
+    var readCount = books.Count(b => b.IsRead);
+
+    return new
+    {
+        type = "flex",
+        altText = "ชั้นหนังสือ",
+        contents = new
+        {
+            type = "bubble",
+            header = new
+            {
+                type = "box",
+                layout = "vertical",
+                spacing = "xs",
+                contents = new object[]
+                {
+                    new { type = "text", text = "ชั้นหนังสือ", weight = "bold", size = "lg" },
+                    new { type = "text", text = $"ทั้งหมด {books.Count} เล่ม อ่านแล้ว {readCount} เล่ม", size = "xs", color = "#888888" }
+                }
+            },
+            body = new { type = "box", layout = "vertical", spacing = "md", contents = rows }
+        }
+    };
+}
+
+static async Task ReplyAsync(HttpClient http, string replyToken, object message)
+{
+    var payload = JsonSerializer.Serialize(new { replyToken, messages = new[] { message } });
 
     var res = await http.PostAsync(
         "https://api.line.me/v2/bot/message/reply",
